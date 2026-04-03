@@ -194,6 +194,10 @@ IF(condition == "true", {
     result = CALL("agent_b", "task")
 })
 
+# Nested EXEC (dynamic workflow execution)
+sub_plan = CALL("planner", "Generate sub-workflow")
+result = EXEC(sub_plan)  # Execute generated USL at runtime
+
 # BREAK
 BREAK()  # Exit current loop
 ```
