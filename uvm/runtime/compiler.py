@@ -1,0 +1,238 @@
+"""USL Compiler - Compiles AST to UVM Bytecode.
+
+Transforms the high-level AST into low-level stack-based instructions.
+"""
+
+from typing import List
+
+from .bytecode import Op, Instruction
+from .parser import (
+    ASTNode, Assign, Call, BinaryOp, Variable, Literal,
+    DoWhile, If, Break, Return, Input, AgentCreate, Block
+)
+
+
+class Compiler:
+    """Compile AST to bytecode."""
+    
+    def __init__(self):
+        self.code: List[Instruction] = []
+        self.constants: List = []
+        self.variables: set = set()
+    
+    def compile(self, node: ASTNode) -> List[Instruction]:
+        """Compile an AST node to bytecode."""
+        self.code = []
+        self.constants = []
+        self.variables = set()
+        
+        self._compile_node(node)
+        
+        # Add implicit return if not present
+        if not self.code or self.code[-1].op != Op.RETURN:
+            self._emit(Op.LOAD_CONST, None)
+            self._emit(Op.RETURN)
+        
+        return self.code
+    
+    def _emit(self, op: Op, operand=None):
+        """Emit an instruction."""
+        self.code.append(Instruction(op, operand))
+    
+    def _add_const(self, value) -> int:
+        """Add a constant and return its index."""
+        # Try to find existing
+        try:
+            return self.constants.index(value)
+        except ValueError:
+            idx = len(self.constants)
+            self.constants.append(value)
+            return idx
+    
+    def _compile_node(self, node: ASTNode):
+        """Dispatch to appropriate compile method."""
+        if isinstance(node, Block):
+            self._compile_block(node)
+        elif isinstance(node, Assign):
+            self._compile_assign(node)
+        elif isinstance(node, Call):
+            self._compile_call(node)
+        elif isinstance(node, BinaryOp):
+            self._compile_binary_op(node)
+        elif isinstance(node, Variable):
+            self._compile_variable(node)
+        elif isinstance(node, Literal):
+            self._compile_literal(node)
+        elif isinstance(node, DoWhile):
+            self._compile_do_while(node)
+        elif isinstance(node, If):
+            self._compile_if(node)
+        elif isinstance(node, Break):
+            self._compile_break(node)
+        elif isinstance(node, Return):
+            self._compile_return(node)
+        elif isinstance(node, Input):
+            self._compile_input(node)
+        elif isinstance(node, AgentCreate):
+            self._compile_agent_create(node)
+        else:
+            raise ValueError(f"Unknown AST node type: {type(node)}")
+    
+    def _compile_block(self, node: Block):
+        """Compile a block of statements."""
+        for stmt in node.statements:
+            self._compile_node(stmt)
+    
+    def _compile_assign(self, node: Assign):
+        """Compile assignment: name = value"""
+        # Compile value (leaves result on stack)
+        self._compile_node(node.value)
+        
+        # Store to variable
+        self._emit(Op.STORE_VAR, node.name)
+        self.variables.add(node.name)
+    
+    def _compile_call(self, node: Call):
+        """Compile function call."""
+        # Compile callee
+        if isinstance(node.callee, Literal):
+            idx = self._add_const(node.callee.value)
+            self._emit(Op.LOAD_CONST, idx)
+        elif isinstance(node.callee, Variable):
+            self._emit(Op.LOAD_VAR, node.callee.name)
+        else:
+            self._compile_node(node.callee)
+        
+        # Compile arguments (each leaves value on stack)
+        for arg in node.args:
+            self._compile_node(arg)
+        
+        # Emit call with arg count
+        self._emit(Op.YIELD_CALL, len(node.args))
+    
+    def _compile_binary_op(self, node: BinaryOp):
+        """Compile binary operation."""
+        # Compile operands
+        self._compile_node(node.left)
+        self._compile_node(node.right)
+        
+        # Emit operator
+        op_map = {
+            '+': Op.ADD,
+            '==': Op.EQ,
+            '<': Op.LT,
+            '>': Op.GT,
+        }
+        if node.op not in op_map:
+            raise ValueError(f"Unknown operator: {node.op}")
+        self._emit(op_map[node.op])
+    
+    def _compile_variable(self, node: Variable):
+        """Compile variable reference."""
+        self._emit(Op.LOAD_VAR, node.name)
+    
+    def _compile_literal(self, node: Literal):
+        """Compile literal value.
+        
+        For simple values, inline them directly.
+        For complex values, use the constants table.
+        """
+        # Inline simple values directly
+        self._emit(Op.LOAD_CONST, node.value)
+    
+    def _compile_do_while(self, node: DoWhile):
+        """Compile DO-WHILE loop.
+        
+        Structure:
+            DO_WHILE_START (mark position)
+            [body]
+            [condition]
+            DO_WHILE_END (jump back if true)
+        """
+        start_pos = len(self.code)
+        self._emit(Op.DO_WHILE_START)
+        
+        # Compile body
+        for stmt in node.body:
+            self._compile_node(stmt)
+        
+        # Compile condition
+        self._compile_node(node.condition)
+        
+        # Jump back if true, else continue
+        self._emit(Op.DO_WHILE_END, start_pos)
+    
+    def _compile_if(self, node: If):
+        """Compile IF statement.
+        
+        Structure:
+            [condition]
+            JUMP_IF_FALSE else_pos
+            [then body]
+            JUMP end_pos
+            else_pos:
+            [else body]
+            end_pos:
+        """
+        # Condition
+        self._compile_node(node.condition)
+        
+        # Jump to else if false
+        jump_else_idx = len(self.code)
+        self._emit(Op.JUMP_IF_FALSE, None)  # Will patch
+        
+        # Then body
+        for stmt in node.then_body:
+            self._compile_node(stmt)
+        
+        # Jump to end
+        jump_end_idx = len(self.code)
+        self._emit(Op.JUMP, None)  # Will patch
+        
+        # Else position
+        else_pos = len(self.code)
+        self.code[jump_else_idx] = Instruction(Op.JUMP_IF_FALSE, else_pos)
+        
+        # Else body
+        if node.else_body:
+            for stmt in node.else_body:
+                self._compile_node(stmt)
+        
+        # End position
+        end_pos = len(self.code)
+        self.code[jump_end_idx] = Instruction(Op.JUMP, end_pos)
+    
+    def _compile_break(self, node: Break):
+        """Compile BREAK statement."""
+        self._emit(Op.BREAK)
+    
+    def _compile_return(self, node: Return):
+        """Compile RETURN statement."""
+        if node.value:
+            self._compile_node(node.value)
+        else:
+            self._emit(Op.LOAD_CONST, self._add_const(None))
+        self._emit(Op.RETURN)
+    
+    def _compile_input(self, node: Input):
+        """Compile INPUT() call."""
+        self._emit(Op.INPUT)
+    
+    def _compile_agent_create(self, node: AgentCreate):
+        """Compile AGENT creation.
+        
+        Structure:
+            LOAD_CONST name
+            LOAD_CONST lm
+            LOAD_CONST prompt
+            AGENT_CREATE
+        """
+        self._emit(Op.LOAD_CONST, self._add_const(node.name))
+        self._emit(Op.LOAD_CONST, self._add_const(node.lm))
+        self._emit(Op.LOAD_CONST, self._add_const(node.prompt))
+        self._emit(Op.AGENT_CREATE)
+
+
+def compile_ast(node: ASTNode) -> List[Instruction]:
+    """Compile an AST node to bytecode."""
+    return Compiler().compile(node)

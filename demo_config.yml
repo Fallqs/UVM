@@ -1,0 +1,17 @@
+# UVM Demo Configuration
+# This is a placeholder configuration for demonstration purposes.
+# In production, use environment variables for sensitive values.
+
+model: gpt-4o-mini
+temperature: 0.7
+max_tokens: 1024
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# System prompt (optional)
+# system: "You are a helpful assistant."
+
+# API configuration - use environment variables
+# api_key: ${OPENAI_API_KEY}
+# base_url: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
