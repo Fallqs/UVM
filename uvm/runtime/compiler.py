@@ -8,7 +8,7 @@ from typing import List
 from .bytecode import Op, Instruction
 from .parser import (
     ASTNode, Assign, Call, BinaryOp, Variable, Literal,
-    DoWhile, If, Break, Return, Input, AgentCreate, Block
+    DoWhile, If, Break, Return, Input, Exec, AgentCreate, Block
 )
 
 
@@ -73,6 +73,8 @@ class Compiler:
             self._compile_return(node)
         elif isinstance(node, Input):
             self._compile_input(node)
+        elif isinstance(node, Exec):
+            self._compile_exec(node)
         elif isinstance(node, AgentCreate):
             self._compile_agent_create(node)
         else:
@@ -217,6 +219,25 @@ class Compiler:
     def _compile_input(self, node: Input):
         """Compile INPUT() call."""
         self._emit(Op.INPUT)
+    
+    def _compile_exec(self, node: Exec):
+        """Compile EXEC(plan) or EXEC(plan, initial_vars).
+        
+        Structure:
+            [plan]
+            [initial_vars or None]
+            EXEC
+        """
+        # Compile plan expression
+        self._compile_node(node.plan)
+        
+        # Compile initial_vars if present, else push None
+        if node.initial_vars:
+            self._compile_node(node.initial_vars)
+        else:
+            self._emit(Op.LOAD_CONST, None)
+        
+        self._emit(Op.EXEC)
     
     def _compile_agent_create(self, node: AgentCreate):
         """Compile AGENT creation.

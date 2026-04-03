@@ -33,6 +33,7 @@ class Op(IntEnum):
     YIELD_CALL = 31         # Yield before calling (for memory management)
     INPUT = 32              # Read user input
     RETURN = 33             # Return from execution
+    EXEC = 34               # Execute nested USL code
     
     # Block operations
     DO_WHILE_START = 40     # Mark start of DO-WHILE

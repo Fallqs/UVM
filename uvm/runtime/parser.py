@@ -88,6 +88,13 @@ class Input(ASTNode):
 
 
 @dataclass
+class Exec(ASTNode):
+    """EXEC(plan) - Execute USL code"""
+    plan: "ASTNode"  # Can be string literal or variable
+    initial_vars: Optional["ASTNode"] = None  # Optional dict of initial variables
+
+
+@dataclass
 class AgentCreate(ASTNode):
     """AGENT(name, lm, prompt)"""
     name: str
@@ -231,6 +238,8 @@ class Parser:
             self._expect('LPAREN')
             self._expect('RPAREN')
             return Input()
+        if self._match('IDENT', 'EXEC'):
+            return self._parse_exec()
         
         # Check for assignment: ident = expr
         if self._match('IDENT'):
@@ -343,6 +352,23 @@ class Parser:
         self._expect('RPAREN')
         return Return(value)
     
+    def _parse_exec(self) -> Exec:
+        """Parse EXEC(plan) or EXEC(plan, initial_vars)."""
+        self._expect('IDENT', 'EXEC')
+        self._expect('LPAREN')
+        
+        # Plan - can be string literal or variable/expression
+        plan = self._parse_expression()
+        
+        # Optional initial_vars
+        initial_vars = None
+        if self._match('COMMA'):
+            self._advance()
+            initial_vars = self._parse_expression()
+        
+        self._expect('RPAREN')
+        return Exec(plan, initial_vars)
+    
     def _parse_assignment(self) -> Assign:
         """Parse name = value."""
         name = self._expect('IDENT')[1]
@@ -403,6 +429,10 @@ class Parser:
             if name == 'RETURN' and self._match('LPAREN'):
                 self.current -= 1
                 return self._parse_return()
+            
+            if name == 'EXEC' and self._match('LPAREN'):
+                self.current -= 1
+                return self._parse_exec()
             
             return Variable(name)
         

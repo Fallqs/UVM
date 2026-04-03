@@ -79,6 +79,18 @@ print("\n--- USL with INPUT (commented out, requires user input) ---")
 # print(f"Input result: {result}")
 print("(Skipped - requires manual input)")
 
+# Demonstrate nested EXEC (dynamic workflow execution)
+print("\n--- Nested EXEC (Dynamic Workflow) ---")
+inner_workflow = 'step = "processed"\nresult = step + "_by_inner"\nRETURN(result)'
+outer_workflow = f"""
+outer_val = "outer_start"
+inner_result = EXEC('{inner_workflow}')
+final = outer_val + " -> " + inner_result
+RETURN(final)
+"""
+nested_result = EXEC(outer_workflow)
+print(f"Nested EXEC result: {nested_result}")
+
 # Demonstrate context stats
 print("\n--- Context Stats ---")
 ctx = uvm.get_context()

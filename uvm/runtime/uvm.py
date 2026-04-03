@@ -321,6 +321,13 @@ class UVM:
             name = self.stack.pop()
             self._create_agent(name, lm, prompt)
         
+        # Nested EXEC
+        elif op == Op.EXEC:
+            initial_vars = self.stack.pop()
+            plan = self.stack.pop()
+            result = self._exec_nested(plan, initial_vars)
+            self.stack.append(result)
+        
         elif op == Op.NOP:
             pass
         
@@ -393,6 +400,46 @@ class UVM:
         
         # Store reference in globals
         self.globals[str(name)] = agent
+    
+    def _exec_nested(self, plan, initial_vars):
+        """Execute nested USL code.
+        
+        This enables dynamic workflow execution where USL code can generate
+        and execute more USL at runtime.
+        
+        Args:
+            plan: USL source code string (or MemStr)
+            initial_vars: Optional dict of initial variables
+        
+        Returns:
+            Result of the nested execution.
+        """
+        from .parser import parse
+        from .compiler import compile_ast
+        
+        # Convert plan to string
+        plan_str = str(plan)
+        
+        # Parse and compile
+        ast = parse(plan_str)
+        bytecode = compile_ast(ast)
+        
+        # Convert initial_vars if present
+        init_vars = None
+        if initial_vars is not None:
+            if isinstance(initial_vars, dict):
+                init_vars = {
+                    k: to_memstr(v, self.memory_engine, "exec_init")
+                    for k, v in initial_vars.items()
+                }
+        
+        # Create child VM (shares context and memory engine)
+        child_vm = UVM(bytecode, self.context, init_vars)
+        
+        # Run to completion
+        result = child_vm.run_to_completion()
+        
+        return result
     
     def __repr__(self):
         return f"UVM(ip={self.ip}, stack_depth={len(self.stack)}, state={self.state.name})"
