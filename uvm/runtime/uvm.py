@@ -59,9 +59,6 @@ class UVM:
         self.state = VMState.RUNNING
         self.yield_payload = None
         self.return_value = None
-        
-        # Track loop positions for BREAK
-        self.loop_stack: List[int] = []
     
     def snapshot(self) -> dict:
         """Create serializable snapshot of VM state.
@@ -76,7 +73,6 @@ class UVM:
             "globals": {k: (str(v) if isinstance(v, MemStr) else v) 
                        for k, v in self.globals.items()},
             "frames": [(f.return_ip, dict(f.locals)) for f in self.frames],
-            "loop_stack": self.loop_stack.copy(),
         }
     
     @classmethod
@@ -94,10 +90,15 @@ class UVM:
         """
         vm = cls(bytecode, context)
         vm.ip = snapshot["ip"]
-        vm.stack = [to_memstr(item, vm.memory_engine) for item in snapshot["stack"]]
-        vm.globals = {k: to_memstr(v, vm.memory_engine) for k, v in snapshot["globals"].items()}
+        vm.stack = [
+            (to_memstr(item, vm.memory_engine) if isinstance(item, str) else item)
+            for item in snapshot["stack"]
+        ]
+        vm.globals = {
+            k: (to_memstr(v, vm.memory_engine) if isinstance(v, str) else v)
+            for k, v in snapshot["globals"].items()
+        }
         vm.frames = [Frame(ip, locals_dict) for ip, locals_dict in snapshot["frames"]]
-        vm.loop_stack = snapshot["loop_stack"]
         return vm
     
     def step(self) -> tuple:
@@ -239,6 +240,11 @@ class UVM:
             if not cond:
                 self.ip = operand
         
+        elif op == Op.JUMP_IF_TRUE:
+            cond = self.stack.pop()
+            if cond:
+                self.ip = operand
+        
         # UVM-specific
         elif op == Op.CALL:
             # Immediate call (non-yielding)
@@ -283,36 +289,6 @@ class UVM:
             else:
                 self.return_value = None
             self.state = VMState.HALTED
-        
-        # Loop operations
-        elif op == Op.DO_WHILE_START:
-            self.loop_stack.append(self.ip - 1)  # Position after DO_WHILE_START
-        
-        elif op == Op.DO_WHILE_END:
-            # Condition is on stack
-            cond = self.stack.pop()
-            if cond:
-                # Jump back to loop start
-                self.ip = self.loop_stack[-1]
-            else:
-                # Exit loop
-                self.loop_stack.pop()
-        
-        elif op == Op.BREAK:
-            # Jump past the DO_WHILE_END
-            if self.loop_stack:
-                # Find the DO_WHILE_END by scanning ahead
-                depth = 1
-                while self.ip < len(self.bytecode) and depth > 0:
-                    if self.bytecode[self.ip].op == Op.DO_WHILE_START:
-                        depth += 1
-                    elif self.bytecode[self.ip].op == Op.DO_WHILE_END:
-                        depth -= 1
-                        if depth == 0:
-                            self.ip += 1  # Skip the DO_WHILE_END
-                            break
-                    self.ip += 1
-                self.loop_stack.pop()
         
         # Agent operations
         elif op == Op.AGENT_CREATE:

@@ -19,14 +19,19 @@ class Compiler:
         self.code: List[Instruction] = []
         self.constants: List = []
         self.variables: set = set()
+        self.break_stack: List[List[int]] = []  # Pending BREAK patches per loop level
     
     def compile(self, node: ASTNode) -> List[Instruction]:
         """Compile an AST node to bytecode."""
         self.code = []
         self.constants = []
         self.variables = set()
+        self.break_stack = []
         
         self._compile_node(node)
+        
+        if self.break_stack:
+            raise SyntaxError("BREAK without enclosing loop")
         
         # Add implicit return if not present
         if not self.code or self.code[-1].op != Op.RETURN:
@@ -51,6 +56,7 @@ class Compiler:
     
     def _compile_node(self, node: ASTNode):
         """Dispatch to appropriate compile method."""
+        # TODO: convert this into a dictionary version for better extensibility.
         if isinstance(node, Block):
             self._compile_block(node)
         elif isinstance(node, Assign):
@@ -98,8 +104,7 @@ class Compiler:
         """Compile function call."""
         # Compile callee
         if isinstance(node.callee, Literal):
-            idx = self._add_const(node.callee.value)
-            self._emit(Op.LOAD_CONST, idx)
+            self._emit(Op.LOAD_CONST, node.callee.value)
         elif isinstance(node.callee, Variable):
             self._emit(Op.LOAD_VAR, node.callee.name)
         else:
@@ -143,26 +148,34 @@ class Compiler:
         self._emit(Op.LOAD_CONST, node.value)
     
     def _compile_do_while(self, node: DoWhile):
-        """Compile DO-WHILE loop.
+        """Compile DO-WHILE loop to plain jumps with backpatching.
         
         Structure:
-            DO_WHILE_START (mark position)
+            start:
             [body]
             [condition]
-            DO_WHILE_END (jump back if true)
+            JUMP_IF_TRUE start
+            end:
         """
         start_pos = len(self.code)
-        self._emit(Op.DO_WHILE_START)
+        self.break_stack.append([])  # Collect BREAKs for this loop
         
         # Compile body
         for stmt in node.body:
             self._compile_node(stmt)
         
+        breaks = self.break_stack.pop()
+        
         # Compile condition
         self._compile_node(node.condition)
         
-        # Jump back if true, else continue
-        self._emit(Op.DO_WHILE_END, start_pos)
+        # Loop back if true, else fall through
+        self._emit(Op.JUMP_IF_TRUE, start_pos)
+        end_pos = len(self.code)
+        
+        # Patch BREAKs to jump past the loop
+        for break_idx in breaks:
+            self.code[break_idx] = Instruction(Op.JUMP, end_pos)
     
     def _compile_if(self, node: If):
         """Compile IF statement.
@@ -205,15 +218,18 @@ class Compiler:
         self.code[jump_end_idx] = Instruction(Op.JUMP, end_pos)
     
     def _compile_break(self, node: Break):
-        """Compile BREAK statement."""
-        self._emit(Op.BREAK)
+        """Compile BREAK statement using backpatching."""
+        if not self.break_stack:
+            raise SyntaxError("BREAK outside of loop")
+        self._emit(Op.JUMP, None)  # Placeholder
+        self.break_stack[-1].append(len(self.code) - 1)
     
     def _compile_return(self, node: Return):
         """Compile RETURN statement."""
         if node.value:
             self._compile_node(node.value)
         else:
-            self._emit(Op.LOAD_CONST, self._add_const(None))
+            self._emit(Op.LOAD_CONST, None)
         self._emit(Op.RETURN)
     
     def _compile_input(self, node: Input):
@@ -248,9 +264,9 @@ class Compiler:
             LOAD_CONST prompt
             AGENT_CREATE
         """
-        self._emit(Op.LOAD_CONST, self._add_const(node.name))
-        self._emit(Op.LOAD_CONST, self._add_const(node.lm))
-        self._emit(Op.LOAD_CONST, self._add_const(node.prompt))
+        self._emit(Op.LOAD_CONST, node.name)
+        self._emit(Op.LOAD_CONST, node.lm)
+        self._emit(Op.LOAD_CONST, node.prompt)
         self._emit(Op.AGENT_CREATE)
 
 

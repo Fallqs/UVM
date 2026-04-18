@@ -27,6 +27,7 @@ class Op(IntEnum):
     # Control flow
     JUMP = 20               # Unconditional jump
     JUMP_IF_FALSE = 21      # Jump if stack top is falsy
+    JUMP_IF_TRUE = 22       # Jump if stack top is truthy
     
     # UVM-specific
     CALL = 30               # Call LM/Agent
@@ -34,11 +35,6 @@ class Op(IntEnum):
     INPUT = 32              # Read user input
     RETURN = 33             # Return from execution
     EXEC = 34               # Execute nested USL code
-    
-    # Block operations
-    DO_WHILE_START = 40     # Mark start of DO-WHILE
-    DO_WHILE_END = 41       # Check condition, jump back if true
-    BREAK = 42              # Break out of current loop
     
     # Agent operations
     AGENT_CREATE = 50       # Create and register agent
